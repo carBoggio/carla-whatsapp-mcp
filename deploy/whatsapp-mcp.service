@@ -1,0 +1,32 @@
+[Unit]
+Description=Servidor MCP de WhatsApp (HTTP en 127.0.0.1:8090)
+After=whatsapp-bridge.service
+Requires=whatsapp-bridge.service
+
+[Service]
+User=whatsapp
+Group=whatsapp
+WorkingDirectory=/opt/whatsapp-mcp/whatsapp-mcp-server
+ExecStart=/opt/whatsapp-mcp/whatsapp-mcp-server/.venv/bin/python main.py
+Environment=WA_MCP_HOST=127.0.0.1
+Environment=WA_MCP_PORT=8090
+Restart=on-failure
+RestartSec=10
+UMask=0077
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/opt/whatsapp-mcp/whatsapp-bridge/store
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

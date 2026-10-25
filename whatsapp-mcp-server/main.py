@@ -10,13 +10,16 @@ from whatsapp import (
     get_last_interaction as whatsapp_get_last_interaction,
     get_message_context as whatsapp_get_message_context,
     send_message as whatsapp_send_message,
-    send_file as whatsapp_send_file,
-    send_audio_message as whatsapp_audio_voice_message,
-    download_media as whatsapp_download_media
 )
+import os
 
 # Initialize FastMCP server
-mcp = FastMCP("whatsapp")
+# Served over HTTP on loopback so it can run as the isolated "whatsapp" system user.
+mcp = FastMCP(
+    "whatsapp",
+    host=os.environ.get("WA_MCP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("WA_MCP_PORT", "8090")),
+)
 
 @mcp.tool()
 def search_contacts(query: str) -> List[Dict[str, Any]]:
@@ -183,69 +186,10 @@ def send_message(
         "message": status_message
     }
 
-@mcp.tool()
-def send_file(recipient: str, media_path: str) -> Dict[str, Any]:
-    """Send a file such as a picture, raw audio, video or document via WhatsApp to the specified recipient. For group messages use the JID.
-    
-    Args:
-        recipient: The recipient - either a phone number with country code but no + or other symbols,
-                 or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
-        media_path: The absolute path to the media file to send (image, video, document)
-    
-    Returns:
-        A dictionary containing success status and a status message
-    """
-    
-    # Call the whatsapp_send_file function
-    success, status_message = whatsapp_send_file(recipient, media_path)
-    return {
-        "success": success,
-        "message": status_message
-    }
-
-@mcp.tool()
-def send_audio_message(recipient: str, media_path: str) -> Dict[str, Any]:
-    """Send any audio file as a WhatsApp audio message to the specified recipient. For group messages use the JID. If it errors due to ffmpeg not being installed, use send_file instead.
-    
-    Args:
-        recipient: The recipient - either a phone number with country code but no + or other symbols,
-                 or a JID (e.g., "123456789@s.whatsapp.net" or a group JID like "123456789@g.us")
-        media_path: The absolute path to the audio file to send (will be converted to Opus .ogg if it's not a .ogg file)
-    
-    Returns:
-        A dictionary containing success status and a status message
-    """
-    success, status_message = whatsapp_audio_voice_message(recipient, media_path)
-    return {
-        "success": success,
-        "message": status_message
-    }
-
-@mcp.tool()
-def download_media(message_id: str, chat_jid: str) -> Dict[str, Any]:
-    """Download media from a WhatsApp message and get the local file path.
-    
-    Args:
-        message_id: The ID of the message containing the media
-        chat_jid: The JID of the chat containing the message
-    
-    Returns:
-        A dictionary containing success status, a status message, and the file path if successful
-    """
-    file_path = whatsapp_download_media(message_id, chat_jid)
-    
-    if file_path:
-        return {
-            "success": True,
-            "message": "Media downloaded successfully",
-            "file_path": file_path
-        }
-    else:
-        return {
-            "success": False,
-            "message": "Failed to download media"
-        }
+# send_file, send_audio_message and download_media were removed in this hardened
+# build: the bridge rejects media sends, and downloaded files would land in the
+# bridge's private store, which the AI's user cannot read anyway.
 
 if __name__ == "__main__":
     # Initialize and run the server
-    mcp.run(transport='stdio')
+    mcp.run(transport=os.environ.get('WA_MCP_TRANSPORT', 'streamable-http'))

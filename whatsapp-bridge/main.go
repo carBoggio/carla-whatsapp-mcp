@@ -49,7 +49,7 @@ type MessageStore struct {
 // Initialize message store
 func NewMessageStore() (*MessageStore, error) {
 	// Create directory for database if it doesn't exist
-	if err := os.MkdirAll("store", 0755); err != nil {
+	if err := os.MkdirAll("store", 0700); err != nil {
 		return nil, fmt.Errorf("failed to create store directory: %v", err)
 	}
 
@@ -99,6 +99,51 @@ func (store *MessageStore) Close() error {
 }
 
 // Store a chat in the database
+// Allowlist and audit log (see allowlist.go / commands.go)
+var (
+	allow *Allowlist
+	audit *AuditLog
+)
+
+// PurgeChat deletes everything stored for a chat. key is a normalized allowlist key
+// (digits for a person, "...@g.us" for a group).
+func (store *MessageStore) PurgeChat(key string) error {
+	jid := key
+	if !strings.Contains(jid, "@") {
+		jid = key + "@" + types.DefaultUserServer
+	}
+	if _, err := store.db.Exec("DELETE FROM messages WHERE chat_jid = ?", jid); err != nil {
+		return err
+	}
+	_, err := store.db.Exec("DELETE FROM chats WHERE jid = ?", jid)
+	return err
+}
+
+// PurgeNotAllowed deletes every stored chat that is not in the read list.
+func (store *MessageStore) PurgeNotAllowed(a *Allowlist) (int, error) {
+	rows, err := store.db.Query("SELECT jid FROM chats UNION SELECT chat_jid FROM messages")
+	if err != nil {
+		return 0, err
+	}
+	var toDelete []string
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err == nil && !a.CanRead(jid) {
+			toDelete = append(toDelete, jid)
+		}
+	}
+	rows.Close()
+	for _, jid := range toDelete {
+		if _, err := store.db.Exec("DELETE FROM messages WHERE chat_jid = ?", jid); err != nil {
+			return 0, err
+		}
+		if _, err := store.db.Exec("DELETE FROM chats WHERE jid = ?", jid); err != nil {
+			return 0, err
+		}
+	}
+	return len(toDelete), nil
+}
+
 func (store *MessageStore) StoreChat(jid, name string, lastMessageTime time.Time) error {
 	_, err := store.db.Exec(
 		"INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)",
@@ -410,8 +455,20 @@ func extractMediaInfo(msg *waProto.Message) (mediaType string, filename string, 
 
 // Handle regular incoming messages with media support
 func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *events.Message, logger waLog.Logger) {
-	// Save message to database
+	// Owner commands and the self chat are handled here and never stored.
+	if isSelfChat(client.Store.ID, msg.Info.Chat) {
+		text := extractTextContent(msg.Message)
+		if isOwnerCommand(client.Store.ID, msg.Info, text) {
+			handleOwnerCommand(client, messageStore, msg, text)
+		}
+		return
+	}
+
+	// Only chats in the read list are stored.
 	chatJID := msg.Info.Chat.String()
+	if !allow.CanRead(chatJID) {
+		return
+	}
 	sender := msg.Info.Sender.User
 
 	// Get appropriate chat name (pass nil for conversation since we don't have one for regular messages)
@@ -586,7 +643,7 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	}
 
 	// Create directory for the chat if it doesn't exist
-	if err := os.MkdirAll(chatDir, 0755); err != nil {
+	if err := os.MkdirAll(chatDir, 0700); err != nil {
 		return false, "", "", "", fmt.Errorf("failed to create chat directory: %v", err)
 	}
 
@@ -703,7 +760,26 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			return
 		}
 
-		fmt.Println("Received request to send message", req.Message, req.MediaPath)
+		// Media sending is disabled in this hardened build.
+		if req.MediaPath != "" {
+			audit.Printf("BLOCKED send media to %q", req.Recipient)
+			http.Error(w, "Sending files is disabled", http.StatusForbidden)
+			return
+		}
+
+		// Recipient must be in the send list.
+		if !allow.CanSend(req.Recipient) {
+			audit.Printf("BLOCKED send to %q (not in send list)", req.Recipient)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(SendMessageResponse{
+				Success: false,
+				Message: "Recipient not allowed: ask the owner to add it from their phone",
+			})
+			return
+		}
+
+		audit.Printf("SEND to %q (%d chars)", req.Recipient, len(req.Message))
 
 		// Send the message
 		success, message := sendWhatsAppMessage(client, req.Recipient, req.Message, req.MediaPath)
@@ -744,6 +820,12 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			return
 		}
 
+		if !allow.CanRead(req.ChatJID) {
+			audit.Printf("BLOCKED download from %q (not in read list)", req.ChatJID)
+			http.Error(w, "Chat not allowed", http.StatusForbidden)
+			return
+		}
+
 		// Download the media
 		success, mediaType, filename, path, err := downloadMedia(client, messageStore, req.MessageID, req.ChatJID)
 
@@ -775,7 +857,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 	})
 
 	// Start the server
-	serverAddr := fmt.Sprintf(":%d", port)
+	serverAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
 
 	// Run server in a goroutine so it doesn't block
@@ -795,7 +877,7 @@ func main() {
 	dbLog := waLog.Stdout("Database", "INFO", true)
 
 	// Create directory for database if it doesn't exist
-	if err := os.MkdirAll("store", 0755); err != nil {
+	if err := os.MkdirAll("store", 0700); err != nil {
 		logger.Errorf("Failed to create store directory: %v", err)
 		return
 	}
@@ -833,6 +915,27 @@ func main() {
 		return
 	}
 	defer messageStore.Close()
+
+	// Allowlist (fail closed if missing) and audit log
+	allowPath := os.Getenv("WA_ALLOWLIST")
+	if allowPath == "" {
+		allowPath = "store/allowlist.json"
+	}
+	auditPath := os.Getenv("WA_AUDIT_LOG")
+	if auditPath == "" {
+		auditPath = "store/audit.log"
+	}
+	audit = &AuditLog{path: auditPath}
+	allow = NewAllowlist(allowPath)
+	purge := func() {
+		if n, err := messageStore.PurgeNotAllowed(allow); err != nil {
+			logger.Warnf("Failed to purge non-allowed chats: %v", err)
+		} else if n > 0 {
+			audit.Printf("PURGE %d chats no longer in read list", n)
+		}
+	}
+	purge()
+	allow.onChange = purge
 
 	// Setup event handling for messages and history sync
 	client.AddEventHandler(func(evt interface{}) {
@@ -1017,6 +1120,11 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 		}
 
 		chatJID := *conversation.ID
+
+		// Only chats in the read list are stored.
+		if !allow.CanRead(chatJID) {
+			continue
+		}
 
 		// Try to parse the JID
 		jid, err := types.ParseJID(chatJID)
