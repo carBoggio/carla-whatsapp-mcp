@@ -1,0 +1,12 @@
+#cloud-config
+# Se ejecuta una sola vez al crear la VM: instala Tailscale y la une a tu tailnet.
+# Sustituye TSKEY-AQUI por una clave de autenticación de un solo uso, preaprobada
+# y con la etiqueta tag:whatsapp (Tailscale → Settings → Keys).
+package_update: true
+packages:
+  - git
+  - gcc
+  - python3
+runcmd:
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - tailscale up --auth-key=TSKEY-AQUI --ssh --advertise-tags=tag:whatsapp --hostname=whatsapp-vm

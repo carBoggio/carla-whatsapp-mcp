@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from whatsapp import (
     search_contacts as whatsapp_search_contacts,
     list_messages as whatsapp_list_messages,
@@ -15,10 +16,25 @@ import os
 
 # Initialize FastMCP server
 # Served over HTTP on loopback so it can run as the isolated "whatsapp" system user.
+# Remote access goes through a proxy on the same machine (e.g. `tailscale serve`),
+# never by binding to a public interface.
+#
+# DNS-rebinding protection only accepts requests whose Host header is localhost.
+# When a proxy forwards the original host name (e.g. "my-vm.tailnet.ts.net"),
+# list it in WA_MCP_EXTRA_HOSTS (comma separated, no port).
+_host = os.environ.get("WA_MCP_HOST", "127.0.0.1")
+_extra = [h.strip() for h in os.environ.get("WA_MCP_EXTRA_HOSTS", "").split(",") if h.strip()]
+_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"] + [h for x in _extra for h in (x, x + ":*")],
+    allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+    + [f"https://{x}" for x in _extra],
+)
 mcp = FastMCP(
     "whatsapp",
-    host=os.environ.get("WA_MCP_HOST", "127.0.0.1"),
+    host=_host,
     port=int(os.environ.get("WA_MCP_PORT", "8090")),
+    transport_security=_security,
 )
 
 @mcp.tool()

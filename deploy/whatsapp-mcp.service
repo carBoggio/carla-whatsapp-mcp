@@ -1,5 +1,5 @@
 [Unit]
-Description=Servidor MCP de WhatsApp (HTTP en 127.0.0.1:8090)
+Description=Servidor MCP de WhatsApp (HTTP en 127.0.0.1:8090, publicado solo en la tailnet)
 After=whatsapp-bridge.service
 Requires=whatsapp-bridge.service
 
@@ -10,6 +10,8 @@ WorkingDirectory=/opt/whatsapp-mcp/whatsapp-mcp-server
 ExecStart=/opt/whatsapp-mcp/whatsapp-mcp-server/.venv/bin/python main.py
 Environment=WA_MCP_HOST=127.0.0.1
 Environment=WA_MCP_PORT=8090
+# Aquí va WA_MCP_EXTRA_HOSTS=<nombre-de-la-vm>.<tu-tailnet>.ts.net
+EnvironmentFile=-/etc/default/whatsapp-mcp
 Restart=on-failure
 RestartSec=10
 UMask=0077

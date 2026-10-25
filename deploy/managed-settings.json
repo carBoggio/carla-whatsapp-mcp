@@ -4,16 +4,9 @@
       "mcp__whatsapp__send_message"
     ],
     "deny": [
-      "Read(//opt/whatsapp-mcp/**)",
-      "Edit(//opt/whatsapp-mcp/**)",
-      "Write(//opt/whatsapp-mcp/**)",
-      "Edit(//etc/claude-code/**)",
-      "Write(//etc/claude-code/**)",
-      "Edit(//etc/systemd/system/whatsapp-*)",
-      "Write(//etc/systemd/system/whatsapp-*)",
-      "Bash(sudo *)",
-      "Bash(sqlite3 *)",
-      "Bash(systemctl * whatsapp*)"
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(tailscale *)"
     ]
   }
 }
