@@ -174,7 +174,7 @@ func handleOwnerCommand(client *whatsmeow.Client, store *MessageStore, msg *even
 			return store.PurgeChat(key)
 		},
 		listGroups: func() (string, error) {
-			groups, err := client.GetJoinedGroups()
+			groups, err := client.GetJoinedGroups(context.Background())
 			if err != nil {
 				return "", err
 			}
