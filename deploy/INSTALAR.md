@@ -11,7 +11,7 @@ Tu ordenador (Claude Code) ──Tailscale──▶ VM de Azure
 
 La VM no tiene ningún puerto abierto a internet. Solo tus dispositivos de Tailscale llegan al MCP, y el puente nunca sale de la VM.
 
-Qué hace el parche (sobre `lharries/whatsapp-mcp`, commit `7d6a06d`):
+Qué cambia este repositorio respecto al original (`lharries/whatsapp-mcp`, commit `7d6a06d`):
 
 - **El puente aplica las listas**: solo guarda chats en `read`, solo envía a chats en `send`, bloquea el envío de archivos y las descargas de chats no permitidos. Si la lista falta o está rota, deniega todo.
 - **Comandos desde tu móvil** en el chat contigo mismo (`/permitir`, `/permitir-leer`, `/quitar`, `/lista`, `/grupos`, `/ayuda`), aceptados solo desde la app del móvil principal.
@@ -111,16 +111,14 @@ source ~/.bashrc
 go version && uv --version
 ```
 
-## 5. Clonar y aplicar el parche
+## 5. Clonar el repositorio
 
-Copia el parche desde tu ordenador: `scp whatsapp-mcp-allowlist.patch tu_usuario@whatsapp-vm:`. En la VM:
+En la VM (el repositorio es público, no hace falta autenticarse):
 
 ```bash
-git clone https://github.com/lharries/whatsapp-mcp.git ~/staging/whatsapp-mcp
+git clone https://github.com/carBoggio/carla-whatsapp-mcp.git ~/staging/whatsapp-mcp
 cd ~/staging/whatsapp-mcp
-git checkout 7d6a06dcdce1f01dfb24f60e1030d5efba9f3b88
-git -c user.name=yo -c user.email=yo@local am ~/whatsapp-mcp-allowlist.patch
-git show --stat HEAD     # revisa el diff
+git log --oneline -4     # los cambios van encima de 7d6a06d (el original)
 ```
 
 ## 6. Probar y compilar
